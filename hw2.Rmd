@@ -1,0 +1,442 @@
+---
+title: "HW2"
+author: "muwuxu"
+date: '2022-09-28'
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Q1
+
+```{r}
+require(ISLR2)
+require(caret)
+require(tidyverse)
+```
+
+```{r}
+# Structure of the Data
+data('College')
+str(College)
+set.seed(1)
+```
+
+```{r}
+dim(College) # 777 * 18 
+summary(College)
+# there is no NAs.  
+```
+
+```{r}
+
+# split the data
+inTrain <- createDataPartition(College$Apps, p = 0.80, list = FALSE)
+
+training <- College[inTrain,]
+testing <- College[-inTrain,]
+
+head(training)
+nrow(training)
+
+head(testing)
+nrow(testing)
+```
+
+```{r}
+# do the transfomation 
+preObj <- preProcess(training, method = c('center', 'scale'))
+
+training <- predict(preObj, training)
+testing <- predict(preObj, testing)
+
+head(training)
+
+head(testing)
+```
+
+```{r}
+# 
+y_train <- training$Apps
+y_test <- testing$Apps
+
+# change the categorical to dummy 
+one_hot_encoding <- dummyVars(Apps ~ ., data = training)
+x_train <- predict(one_hot_encoding, training)
+x_test <- predict(one_hot_encoding, testing)
+
+dim(x_train)
+colnames(College)
+colnames(x_train)
+head(x_train)
+
+```
+
+```{r}
+lin_mod <- lm(Apps ~ ., data = training)
+
+pred <- predict(lin_mod, testing)
+
+lin_info <- postResample(pred, testing$Apps)
+lin_info
+```
+
+```{r}
+ridge_mod <- train(x = x_train, y = y_train,
+                   method = 'glmnet', 
+                   trControl = trainControl(method = 'cv', number = 10),
+                   tuneGrid = expand.grid(alpha = 0,
+                                          lambda = seq(0, 10e3, length.out = 20)))
+
+ridge_info <- postResample(predict(ridge_mod, x_test), y_test)
+ridge_info
+```
+
+```{r}
+coef(ridge_mod$finalModel, ridge_mod$bestTune$lambda)
+```
+
+```{r}
+lasso_mod <- train(x = x_train, y = y_train, 
+                   method = 'glmnet',
+                   trControl = trainControl(method = 'cv', number = 10),
+                   tuneGrid = expand.grid(alpha = 1,
+                                          lambda = seq(0.0001, 1, length.out = 50)))
+
+lasso_info <- postResample(predict(lasso_mod, x_test), y_test)
+lasso_info
+```
+
+```{r}
+as_data_frame(rbind(lin_info,
+      ridge_info,
+      lasso_info)) %>%
+    mutate(model = c('Linear', 'Ridge', 'Lasso' ))
+
+## The models all perform similarly. R2 around 87% for them all and RMSE≤0.35. When we compare the RMSE scores with the mean and standard deviation of the response variable we see that the models all have great accuracy. So there are not much differences between these three approaches. 
+```
+
+# Q2
+
+```{r}
+library(ggplot2)
+library(caret)
+library(glmnet)
+library(gridExtra)
+library(leaps)
+library(pROC)
+
+```
+
+Can you predict who will be interested in buying a caravan insurance policy and give an explanation why? Yes. Becaues we can use the features to fit a model and then predict the probability so to priedict who will be interested in buying the insurance.
+
+```{r}
+train_data <- read.delim("./ticdata2000.txt", header = FALSE, sep = "\t", dec = ".")
+test_data <-  read.delim("./ticeval2000.txt", header = FALSE, sep = "\t", dec = ".")
+targets <-    read.delim("./tictgts2000.txt", header = FALSE, sep = "\t", dec = ".")
+names(targets) = "V86"
+test_data = cbind(test_data,targets)
+head(test_data)
+```
+
+## Explore data
+
+```{r}
+dim(train_data)
+head(train_data)
+
+dim(test_data)
+head(test_data)
+head(targets)
+str(train_data)
+```
+
+forward selection
+
+```{r}
+# Formula for scope
+
+regfit.fwd <- regsubsets(V86~., data = train_data, nbest = 1, nvmax = ncol(train_data), method = "forward")
+my_sum_fwd <- summary(regfit.fwd)
+my_sum_fwd$outmat
+
+par(mfrow = c(2, 2))
+plot(my_sum_fwd$cp,xlab = "Num of Variables", ylab = "Cp", type = "l", main = paste("Min Error at",which.min(my_sum_fwd$cp), "Variables"))
+points(which.min(my_sum_fwd$cp), my_sum_fwd$cp[which.min(my_sum_fwd$cp)], col = "steelblue", cex = 2, pch = 20)
+
+plot(my_sum_fwd$bic,xlab = "Num of Variables", ylab = "BIC", type = "l", main = paste("Min Error at",which.min(my_sum_fwd$bic), "Variables" ))
+points(which.min(my_sum_fwd$bic), my_sum_fwd$bic[which.min(my_sum_fwd$bic)], col = "darkgoldenrod", cex = 2, pch = 20)
+
+plot(my_sum_fwd$adjr2,xlab = "Num of Variables", ylab = "Adjusted_R^2", type = "l", main = paste("Max AdjR2",which.max(my_sum_fwd$adjr2), "Variables"))
+points(which.max(my_sum_fwd$adjr2), my_sum_fwd$adjr2[which.max(my_sum_fwd$adjr2)], col = "magenta", cex = 2, pch = 20)
+
+plot(my_sum_fwd$rss,xlab = "Num of Variables", ylab = "Residual Sum of Squares", type = "l", main = paste("Min Error at",which.min(my_sum_fwd$rss), "Variables"))
+points(which.min(my_sum_fwd$rss), my_sum_fwd$rss[which.min(my_sum_fwd$rss)], col = "cyan", cex = 2, pch = 20)
+```
+
+```{r}
+## using adj R2 as the metrics to select variables
+length(rownames(data.frame(coef(regfit.fwd,47)))[-1])
+paste(rownames(data.frame(coef(regfit.fwd,47)))[-1], collapse = "+")
+```
+
+```{r}
+glm_fwd <- glm(V86 ~ V2+V4+V6+V7+V8+V10+V14+V16+V18+V21+V22+V23+V28+V30+V31+V32+V33+V34+V35+V36+V39+V41+V42+V43+V44+V46+V47+V50+V51+V53+V55+V57+V58+V59+V60+V61+V65+V72+V73+V76+V78+V79+V80+V81+V82+V83+V85, 
+    data= train_data, 
+    family = binomial(link = "logit"))
+summary(glm_fwd)
+
+y_hat_test = predict(glm_fwd, test_data, type = 'response')
+summary(y_hat_test)
+r4 <- roc(as.vector(targets$V86), as.vector(y_hat_test))
+p = coords(r4,"best",ret="ppv")
+predicted.classes <- ifelse(y_hat_test > p[1,1], 1, 0)
+table(predicted.classes)
+mean(predicted.classes == targets)
+confusionMatrix(table(predicted.classes, targets[,1]), positive = "1")
+```
+
+backward selection
+
+```{r }
+regfit.bwd <- regsubsets(V86~., data = train_data, nbest = 1, nvmax = ncol(train_data), method = "backward")
+my_sum_bwd <- summary(regfit.bwd)
+my_sum_bwd$outmat
+
+par(mfrow = c(2, 2))
+plot(my_sum_bwd$cp,xlab = "Num of Variables", ylab = "Cp", type = "l", main = paste("Min Error at",which.min(my_sum_bwd$cp), "Variables"))
+points(which.min(my_sum_bwd$cp), my_sum_bwd$cp[which.min(my_sum_bwd$cp)], col = "steelblue", cex = 2, pch = 20)
+
+plot(my_sum_bwd$bic,xlab = "Num of Variables", ylab = "BIC", type = "l", main = paste("Min Error at",which.min(my_sum_bwd$bic), "Variables" ))
+points(which.min(my_sum_bwd$bic), my_sum_bwd$bic[which.min(my_sum_bwd$bic)], col = "darkgoldenrod", cex = 2, pch = 20)
+
+plot(my_sum_bwd$adjr2,xlab = "Num of Variables", ylab = "Adjusted_R^2", type = "l", main = paste("Max AdjR2",which.max(my_sum_bwd$adjr2), "Variables"))
+points(which.max(my_sum_bwd$adjr2), my_sum_bwd$adjr2[which.max(my_sum_bwd$adjr2)], col = "magenta", cex = 2, pch = 20)
+
+plot(my_sum_bwd$rss,xlab = "Num of Variables", ylab = "Residual Sum of Squares", type = "l", main = paste("Min Error at",which.min(my_sum_bwd$rss), "Variables"))
+points(which.min(my_sum_bwd$rss), my_sum_bwd$rss[which.min(my_sum_bwd$rss)], col = "cyan", cex = 2, pch = 20)
+```
+
+```{r}
+## using adj R2 as the metrics to select variables
+length(rownames(data.frame(coef(regfit.bwd,39)))[-1])
+paste(rownames(data.frame(coef(regfit.bwd,39)))[-1], collapse = "+")
+```
+
+```{r}
+
+glm_bwd <- glm(V86 ~ V1+V2+V4+V5+V6+V9+V10+V14+V17+V18+V21+V22+V28+V30+V35+V36+V41+V42+V43+V44+V46+V47+V55+V57+V58+V59+V60+V63+V65+V69+V76+V78+V79+V80+V81+V82+V83+V84+V85,
+    data= train_data, 
+    family = binomial(link = "logit"))
+summary(glm_bwd)
+
+y_hat_test = predict(glm_bwd, test_data, type = 'response')
+summary(y_hat_test)
+r4 <- roc(as.vector(targets$V86), as.vector(y_hat_test))
+p = coords(r4,"best",ret="ppv")
+predicted.classes <- ifelse(y_hat_test > p[1,1], 1, 0)
+table(predicted.classes)
+mean(predicted.classes == targets)
+confusionMatrix(table(predicted.classes, targets[,1]), positive = "1")
+```
+
+lasso
+
+```{r Lasso}
+train_x <- model.matrix(V86 ~ . , data = train_data)[, -1]
+train_y <- train_data$V86
+
+set.seed(1234)
+
+cv.lasso <- cv.glmnet(train_x, train_y, alpha = 1, family = "binomial")
+plot(cv.lasso)
+```
+
+```{r}
+lasso_min_lambda <- cv.lasso$lambda.min
+# coef(cv.lasso_3, cv.lasso_3$lambda.min)
+lasso_min_lambda
+```
+
+```{r}
+lasso_model <- glmnet(train_x, train_y, alpha = 1, family = "binomial", lambda = lasso_min_lambda)
+coef(lasso_model)[,1]
+```
+
+# lasso will penalize the coefficient to 0
+
+```{r}
+lasso_coef <- data.frame("coef" = coef(lasso_model)[,1])
+lasso_var <- paste(rownames(lasso_coef[lasso_coef$coef != 0, , drop=F][-1, ,drop=F]) , collapse = "+", sep = "")
+lasso_var
+```
+
+```{r}
+glm_lasso <- glm(V86 ~ V4+V7+V9+V10+V11+V16+V18+V21+V22+V30+V32+V37+V40+V41+V42+V43+V44+V46+V47+V57+V58+V59+V62+V73+V81+V82+V83+V85
+                   , data = train_data, 
+                   family = binomial(link = "logit"))
+glm_lasso_sum <- summary(glm_lasso)
+glm_lasso_sum
+
+y_hat_test = predict(glm_lasso, test_data, type = 'response')
+summary(y_hat_test)
+r4 <- roc(as.vector(targets$V86), as.vector(y_hat_test))
+p = coords(r4,"best",ret="ppv")
+predicted.classes <- ifelse(y_hat_test > p[1,1], 1, 0)
+table(predicted.classes)
+mean(predicted.classes == targets)
+confusionMatrix(table(predicted.classes, targets[,1]), positive = "1")
+```
+
+Ridge Regression
+
+```{r Ridge Regression}
+set.seed(1234)
+
+cv.ridge <- cv.glmnet(train_x, train_y, alpha = 0, family = "binomial")
+
+plot(cv.ridge, main = "RIDGE REGRESSION LAMBDAS")
+```
+
+We choose the optimal value of lambda for Regressing which is one standard error away from the maximum AUC.
+
+```{r Plot lambda for Ridge regression}
+ridge_min_lambda <- cv.ridge$lambda.min
+ridge_min_lambda
+```
+
+```{r Coefficients of Ridge regression}
+ridge_model <- glmnet(train_x, train_y, alpha = 0, family = "binomial", lambda = ridge_min_lambda)
+coefficients(ridge_model)[,1]
+```
+
+ridge regression don't panel the coefficient to 0
+
+```{r}
+y_hat_test <- predict(ridge_model ,newx = as.matrix(test_data[1:85]), type = "response")
+summary(y_hat_test)
+r4 <- roc(as.vector(targets$V86), as.vector(y_hat_test))
+p = coords(r4,"best",ret="ppv")
+predicted.classes <- ifelse(y_hat_test > p[1,1], 1, 0)
+table(predicted.classes)
+mean(predicted.classes == targets)
+confusionMatrix(table(predicted.classes, targets[,1]), positive = "1")
+```
+
+### forward:
+
+               Accuracy : 0.877          
+            Sensitivity : 0.3277         
+            Specificity : 0.9117         
+         Pos Pred Value : 0.1902         
+         Neg Pred Value : 0.9554    
+         
+
+### backward:
+
+               Accuracy : 0.8702          
+            Sensitivity : 0.3529          
+            Specificity : 0.9030          
+         Pos Pred Value : 0.1871          
+         Neg Pred Value : 0.9566          
+
+### lasso
+
+               Accuracy : 0.8455          
+            Sensitivity : 0.37395         
+            Specificity : 0.87533         
+         Pos Pred Value : 0.15950         
+         Neg Pred Value : 0.95671               
+         
+
+### ridge:
+
+               Accuracy : 0.8482          
+            Sensitivity : 0.3782          
+            Specificity : 0.8780          
+         Pos Pred Value : 0.1639          
+         Neg Pred Value : 0.9571            
+         
+         
+
+# conclusion
+
+they have a very similar performance however in terms of the best prediction in buying the insurance (PPV) I think the forward selection wins with 0.19. And also forward selection have a better accuracy rate with 0.87.
+
+# Q3
+
+ESL textbook exercise 2.8 modified: Compare the classification performance of linear regression and k-nearest neighbor classification on the zipcode data. In particular, consider only the 7's and 9's for this problem, and k = 1, 3, 5, 7, 9, 11, 13,15. Show the test error for each choice of k. Describe your results -- are you surprised by the differences in performance?
+
+```{r}
+# Read in the training data
+X <- as.matrix(read.table("zip.train"))
+y7or9 <- which(X[, 1] == 7 | X[, 1] == 9)
+train_x <- X[y7or9, -1]
+train_y <- ifelse(X[y7or9, 1] == 7, 1,0 )
+
+# Read in the test data
+X <- as.matrix(read.table("zip.test"))
+y7or9 <- which(X[, 1] == 7 | X[, 1] == 9)
+test_x <- X[y7or9, -1]
+test_y <- ifelse(X[y7or9, 1] == 7, 1,0 )
+
+
+```
+
+```{r}
+# Classification by linear regression
+L <- lm(train_y ~ train_x)
+summary(L)
+# from the result we could see that there are high collinearity and so some of the coefficients are NA. 
+# drop the NA term  
+L$coefficients[is.na(L$coefficients)]=0
+L$coefficients
+# Classification by linear regression
+
+yhat <- (cbind(1, test_x) %*% L$coef) >= 0.5
+L.error <- mean(yhat != test_y)
+L.error
+```
+
+```{r}
+# Classification by k-nearest neighbors
+library(class)
+k <- c(1, 3, 5, 7,9,11,13, 15)
+k.error <- rep(NA, length(k))
+for (i in 1:length(k)) {
+    yhat <- knn(train_x, test_x, train_y, k[i])
+    k.error[i] <- mean(yhat != test_y)
+}
+```
+
+```{r}
+# Compare results
+error <- matrix(c(L.error, k.error), ncol = 1)
+colnames(error) <- c("Error Rate")
+rownames(error) <- c("Linear Regression", paste("k-NN with k =", k))
+error
+
+
+#                   Error Rate
+# Linear Regression 0.04629630
+# k-NN with k = 1   0.02469136
+# k-NN with k = 3   0.02469136
+# k-NN with k = 5   0.02469136
+# k-NN with k = 7   0.02777778
+# k-NN with k = 9   0.03703704
+# k-NN with k = 11  0.04012346
+# k-NN with k = 13  0.04012346
+# k-NN with k = 15  0.03703704
+
+# the result is not that different and the best kNN result is when k = 1 which is very surprising to me. 
+
+plot(c(1, 15), c(0, 1.1 * max(error)), type = "n", main = "Comparing Classifiers (Linear vs KNN (different K))", 
+     ylab = "Error Rate", xlab = "k")
+abline(h = L.error, col = 2, lty = 4,  lwd= 3)
+points(k, k.error, col = 4)
+lines(k, k.error, col = 4, lty = 2)
+```
